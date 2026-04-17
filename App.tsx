@@ -8,12 +8,11 @@ import AdminDashboard from "./src/screens/AdminDashboard";
 import PreGameSetup from "./src/screens/PreGameSetup";
 import MatchHistory from "./src/screens/MatchHistory";
 import Leaderboards from "./src/screens/Leaderboards";
-import TeamManager from "./src/screens/TeamManager"; // NEW
+import TeamManager from "./src/screens/TeamManager"; 
+import Playoffs from './src/screens/Playoffs'; 
 
 export default function App() {
-  const [currentScreen, setCurrentScreen] = useState<
-    "setup" | "game" | "history" | "leaderboards" | "teamManager"
-  >("setup");
+  const [currentScreen, setCurrentScreen] = useState<'setup' | 'game' | 'history' | 'leaderboards' | 'teamManager' | 'playoffs'>('setup');
   const [activeGameId, setActiveGameId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -39,20 +38,23 @@ export default function App() {
     <View style={styles.container}>
       <StatusBar hidden={true} />
 
-      {currentScreen === "game" && activeGameId !== null ? (
+      {currentScreen === 'game' && activeGameId !== null ? (
         <AdminDashboard gameId={activeGameId} onEndGame={handleEndGame} />
-      ) : currentScreen === "history" ? (
-        <MatchHistory onBack={() => setCurrentScreen("setup")} />
-      ) : currentScreen === "leaderboards" ? (
-        <Leaderboards onBack={() => setCurrentScreen("setup")} />
-      ) : currentScreen === "teamManager" ? (
-        <TeamManager onBack={() => setCurrentScreen("setup")} />
+      ) : currentScreen === 'history' ? (
+        <MatchHistory onBack={() => setCurrentScreen('setup')} />
+      ) : currentScreen === 'leaderboards' ? (
+        <Leaderboards onBack={() => setCurrentScreen('setup')} />
+      ) : currentScreen === 'teamManager' ? (
+        <TeamManager onBack={() => setCurrentScreen('setup')} />
+      ) : currentScreen === 'playoffs' ? (
+        <Playoffs onBack={() => setCurrentScreen('setup')} />
       ) : (
-        <PreGameSetup
-          onStartGame={handleStartGame}
-          onViewHistory={() => setCurrentScreen("history")}
-          onViewLeaderboards={() => setCurrentScreen("leaderboards")}
-          onManageTeams={() => setCurrentScreen("teamManager")}
+        <PreGameSetup 
+          onStartGame={handleStartGame} 
+          onViewHistory={() => setCurrentScreen('history')} 
+          onViewLeaderboards={() => setCurrentScreen('leaderboards')}
+          onManageTeams={() => setCurrentScreen('teamManager')}
+          onViewPlayoffs={() => setCurrentScreen('playoffs')}
         />
       )}
     </View>

@@ -4,6 +4,8 @@ import { Q } from '@nozbe/watermelondb';
 import { database } from '../db';
 import Team from '../db/models/Team';
 import Player from '../db/models/Player';
+import Game from '../db/models/Game';
+import GameEvent from '../db/models/GameEvent';
 
 interface DraftPlayer { id: string; name: string; jersey: string; }
 
@@ -73,11 +75,11 @@ export default function TeamManager({ onBack }: TeamManagerProps) {
     }
   };
 
-  // --- ⚡ DEV SKIP: MASS TEAM GENERATOR ---
+  // --- ⚡ DEV SKIP: MASS GENERATOR (TEAMS + GAMES + STATS) ---
   const handleDevSeedTeams = async () => {
     Alert.alert(
-      "Seed Database",
-      "This will instantly generate 10 dummy teams with 10 players each. Continue?",
+      "Seed League Database",
+      "This will generate 10 teams, 100 players, and simulate 32 finished games with random stats. Continue?",
       [
         { text: "Cancel", style: "cancel" },
         { text: "Generate", style: "destructive", onPress: executeSeed }
@@ -95,27 +97,86 @@ export default function TeamManager({ onBack }: TeamManagerProps) {
       const lastNames = ["Santos", "Reyes", "Cruz", "Bautista", "Ocampo", "Garcia", "Mendoza", "Torres", "Tomas", "Andrada", "Perez", "Legaspi", "Villanueva", "Ramos"];
 
       await database.write(async () => {
+        const createdTeams: Team[] = [];
+        const teamPlayers: Record<string, Player[]> = {};
+
+        // 1. Create Teams & Players
         for (const tName of dummyTeams) {
           const newTeam = await database.get<Team>('teams').create(team => {
             team.name = tName;
             team.isEliminated = false;
           });
+          createdTeams.push(newTeam);
+          teamPlayers[newTeam.id] = [];
 
-          // Give each team exactly 10 players
           for (let i = 0; i < 10; i++) {
-            await database.get<Player>('players').create(player => {
+            const newPlayer = await database.get<Player>('players').create(player => {
               player.team.set(newTeam);
-              // Pick a random last name and add a letter to make it unique
               const randomName = lastNames[Math.floor(Math.random() * lastNames.length)];
               player.name = `${randomName} ${String.fromCharCode(65 + i)}`; 
               player.jerseyNumber = Math.floor(Math.random() * 99).toString();
               player.isActive = false;
             });
+            teamPlayers[newTeam.id].push(newPlayer);
+          }
+        }
+
+        // 2. Simulate 32 Finished Games
+        for (let i = 0; i < 32; i++) {
+          // Pick two random distinct teams
+          const tA = createdTeams[Math.floor(Math.random() * createdTeams.length)];
+          let tB = createdTeams[Math.floor(Math.random() * createdTeams.length)];
+          while (tA.id === tB.id) {
+            tB = createdTeams[Math.floor(Math.random() * createdTeams.length)];
+          }
+
+          const winner = Math.random() > 0.5 ? tA : tB;
+
+          // Create the game record
+          const newGame = await database.get<Game>('games').create(game => {
+            game.teamAId = tA.id;
+            game.teamBId = tB.id;
+            game.status = 'finished';
+            game.winnerId = winner.id;
+          });
+
+          // 3. Generate Fake Box Score Stats for Team A (15 random actions)
+          const playersA = teamPlayers[tA.id];
+          for (let j = 0; j < 15; j++) {
+            const p = playersA[Math.floor(Math.random() * playersA.length)];
+            const eventType = Math.random() > 0.4 ? 'Point' : (Math.random() > 0.5 ? 'Rebound' : 'Assist');
+            const value = eventType === 'Point' ? (Math.random() > 0.5 ? 2 : 3) : 1; 
+            
+            await database.get<GameEvent>('game_events').create(e => {
+              e.gameId = newGame.id;
+              e.teamId = tA.id;
+              e.playerId = p.id;
+              e.eventType = eventType;
+              e.value = value;
+              e.timestampMs = Date.now() - (Math.random() * 100000);
+            });
+          }
+
+          // 4. Generate Fake Box Score Stats for Team B (15 random actions)
+          const playersB = teamPlayers[tB.id];
+          for (let j = 0; j < 15; j++) {
+            const p = playersB[Math.floor(Math.random() * playersB.length)];
+            const eventType = Math.random() > 0.4 ? 'Point' : (Math.random() > 0.5 ? 'Rebound' : 'Assist');
+            const value = eventType === 'Point' ? (Math.random() > 0.5 ? 2 : 3) : 1;
+            
+            await database.get<GameEvent>('game_events').create(e => {
+              e.gameId = newGame.id;
+              e.teamId = tB.id;
+              e.playerId = p.id;
+              e.eventType = eventType;
+              e.value = value;
+              e.timestampMs = Date.now() - (Math.random() * 100000);
+            });
           }
         }
       });
 
-      Alert.alert("Dev Magic Complete", "10 Teams and 100 Players generated successfully!");
+      Alert.alert("Dev Magic Complete", "10 Teams, 100 Players, and 32 Finished Games generated successfully!");
       loadExistingTeams();
     } catch (error) {
       console.error(error);
@@ -131,14 +192,12 @@ export default function TeamManager({ onBack }: TeamManagerProps) {
         <TouchableOpacity style={styles.backBtn} onPress={onBack}><Text style={styles.backBtnText}>← BACK</Text></TouchableOpacity>
         <Text style={styles.title}>LEAGUE MANAGER</Text>
         
-        {/* NEW DEV BUTTON HERE */}
         <TouchableOpacity style={styles.devBtn} onPress={handleDevSeedTeams} disabled={isSaving}>
-          <Text style={styles.devBtnText}>{isSaving ? "SEEDING..." : "⚡ SEED 10 TEAMS"}</Text>
+          <Text style={styles.devBtnText}>{isSaving ? "SEEDING..." : "⚡ SEED GAMES"}</Text>
         </TouchableOpacity>
       </View>
 
       <View style={styles.splitView}>
-        {/* LEFT: CREATE TEAM */}
         <View style={styles.createSection}>
           <Text style={styles.sectionTitle}>CREATE NEW TEAM</Text>
           <TextInput style={styles.teamInput} placeholder="Enter Team Name..." placeholderTextColor="#666" value={teamName} onChangeText={setTeamName} />
@@ -164,7 +223,6 @@ export default function TeamManager({ onBack }: TeamManagerProps) {
           </TouchableOpacity>
         </View>
 
-        {/* RIGHT: EXISTING TEAMS */}
         <View style={styles.existingSection}>
           <Text style={styles.sectionTitle}>REGISTERED TEAMS</Text>
           <ScrollView>
@@ -189,7 +247,6 @@ const styles = StyleSheet.create({
   backBtnText: { color: '#fff', fontWeight: 'bold' },
   title: { color: '#fff', fontSize: 20, fontWeight: 'bold', letterSpacing: 2 },
   
-  // Dev Button
   devBtn: { backgroundColor: '#FFD700', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 5 },
   devBtnText: { color: '#000', fontWeight: 'bold', fontSize: 12 },
 

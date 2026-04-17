@@ -26,7 +26,8 @@ interface PreGameSetupProps {
   onStartGame: (gameId: string) => void;
   onViewHistory: () => void;
   onViewLeaderboards: () => void;
-  onManageTeams: () => void; // NEW ROUTE
+  onManageTeams: () => void;  
+  onViewPlayoffs: () => void;
 }
 
 export default function PreGameSetup({
@@ -34,6 +35,7 @@ export default function PreGameSetup({
   onViewHistory,
   onViewLeaderboards,
   onManageTeams,
+  onViewPlayoffs,
 }: PreGameSetupProps) {
   const [allTeams, setAllTeams] = useState<Team[]>([]);
 
@@ -185,30 +187,18 @@ export default function PreGameSetup({
           </Text>
         </View>
 
-        <View style={{ flexDirection: "row", gap: 10, paddingRight: 15 }}>
-          <TouchableOpacity
-            style={[styles.devBtn, { backgroundColor: "#ff9933" }]}
-            onPress={onManageTeams}
-          >
-            <Text style={[styles.devBtnText, { color: "#000" }]}>
-              ⚙️ MANAGE TEAMS
-            </Text>
+        <View style={{flexDirection: 'row', gap: 10, paddingRight: 15}}>
+          <TouchableOpacity style={[styles.devBtn, {backgroundColor: '#ff4444'}]} onPress={onViewPlayoffs}>
+            <Text style={[styles.devBtnText, {color: '#fff'}]}>🔥 PLAYOFFS</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.devBtn, { backgroundColor: "#4da6ff" }]}
-            onPress={onViewHistory}
-          >
-            <Text style={[styles.devBtnText, { color: "#fff" }]}>
-              📊 HISTORY
-            </Text>
+          <TouchableOpacity style={[styles.devBtn, {backgroundColor: '#ff9933'}]} onPress={onManageTeams}>
+            <Text style={[styles.devBtnText, {color: '#000'}]}>⚙️ TEAMS</Text>
           </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.devBtn, { backgroundColor: "#FFE81F" }]}
-            onPress={onViewLeaderboards}
-          >
-            <Text style={[styles.devBtnText, { color: "#000" }]}>
-              🏆 LEADERBOARDS
-            </Text>
+          <TouchableOpacity style={[styles.devBtn, {backgroundColor: '#4da6ff'}]} onPress={onViewHistory}>
+            <Text style={[styles.devBtnText, {color: '#fff'}]}>📊 HISTORY</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={[styles.devBtn, {backgroundColor: '#FFE81F'}]} onPress={onViewLeaderboards}>
+            <Text style={[styles.devBtnText, {color: '#000'}]}>🏆 LEADERBOARDS</Text>
           </TouchableOpacity>
         </View>
       </View>

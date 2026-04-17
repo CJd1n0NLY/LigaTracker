@@ -33,6 +33,8 @@ interface LeaderboardsProps {
   onBack: () => void;
 }
 
+const MVP_RACE_LIMIT = 15;
+
 export default function Leaderboards({ onBack }: LeaderboardsProps) {
   const [activeTab, setActiveTab] = useState<'standings' | 'mvp'>('standings');
   const [isLoading, setIsLoading] = useState(true);
@@ -102,7 +104,7 @@ export default function Leaderboards({ onBack }: LeaderboardsProps) {
         });
 
         compiledMvp.sort((a, b) => parseFloat(b.ptsPerGame) - parseFloat(a.ptsPerGame));
-        setMvpRace(compiledMvp.filter(p => p.gamesPlayed > 0));
+        setMvpRace(compiledMvp.filter(p => p.gamesPlayed > 0).slice(0, MVP_RACE_LIMIT));
 
         setIsLoading(false);
       } catch (error) {
