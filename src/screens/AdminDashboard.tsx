@@ -46,6 +46,10 @@ export default function AdminDashboard({
   const [scoreA, setScoreA] = useState(0);
   const [scoreB, setScoreB] = useState(0);
 
+  // --- PHASE 15: TEAM FOULS STATE ---
+  const [teamFoulsA, setTeamFoulsA] = useState(0);
+  const [teamFoulsB, setTeamFoulsB] = useState(0);
+
   const [activePlayersA, setActivePlayersA] = useState<ActivePlayer[]>([]);
   const [activePlayersB, setActivePlayersB] = useState<ActivePlayer[]>([]);
   const [benchPlayersA, setBenchPlayersA] = useState<ActivePlayer[]>([]);
@@ -62,7 +66,7 @@ export default function AdminDashboard({
   const [isClockRunning, setIsClockRunning] = useState(false);
   const [selectedPlayer, setSelectedPlayer] = useState<string | null>(null);
 
-  const gameIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const gameIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const refreshStats = async (
     tAId: string,
@@ -133,46 +137,53 @@ export default function AdminDashboard({
   };
 
   const loadGameData = async () => {
-    console.log("1. Starting loadGameData...");
     if (!gameId) {
-      console.log("-> No gameId found, returning to setup.");
-      onEndGame(); 
+      onEndGame();
       return;
     }
 
     try {
-      console.log(`2. Fetching Game ID: ${gameId}`);
       const game = await database.get<Game>("games").find(gameId);
-
       if (game.status === "finished") {
-        console.log("-> Game is already finished. Showing Game Over screen.");
         setIsGameOver(true);
-        setIsLoading(false); 
+        setIsLoading(false);
         return;
       }
 
-      console.log(`3. Fetching Teams (TeamA: ${game.teamAId}, TeamB: ${game.teamBId})`);
       const tA = await database.get<Team>("teams").find(game.teamAId);
       const tB = await database.get<Team>("teams").find(game.teamBId);
       setTeamA(tA);
       setTeamB(tB);
 
-      console.log("4. Fetching Players for Team A...");
-      const dbPlayersA = await database.get<Player>("players").query(Q.where("team_id", tA.id)).fetch();
-      
-      console.log("5. Fetching Players for Team B...");
-      const dbPlayersB = await database.get<Player>("players").query(Q.where("team_id", tB.id)).fetch();
+      const dbPlayersA = await database
+        .get<Player>("players")
+        .query(Q.where("team_id", tA.id))
+        .fetch();
+      const dbPlayersB = await database
+        .get<Player>("players")
+        .query(Q.where("team_id", tB.id))
+        .fetch();
 
-      const basePlayersA = dbPlayersA.map((p) => ({ id: p.id, jersey: p.jerseyNumber, name: p.name, pts: 0, fls: 0, isActive: p.isActive }));
-      const basePlayersB = dbPlayersB.map((p) => ({ id: p.id, jersey: p.jerseyNumber, name: p.name, pts: 0, fls: 0, isActive: p.isActive }));
+      const basePlayersA = dbPlayersA.map((p) => ({
+        id: p.id,
+        jersey: p.jerseyNumber,
+        name: p.name,
+        pts: 0,
+        fls: 0,
+        isActive: p.isActive,
+      }));
+      const basePlayersB = dbPlayersB.map((p) => ({
+        id: p.id,
+        jersey: p.jerseyNumber,
+        name: p.name,
+        pts: 0,
+        fls: 0,
+        isActive: p.isActive,
+      }));
 
-      console.log("6. Calculating Stats...");
       await refreshStats(tA.id, tB.id, basePlayersA, basePlayersB);
-      
-      console.log("7. Success! Turning off loading screen.");
       setIsLoading(false);
     } catch (error) {
-      console.error("!!! DATABASE CRASH !!! :", error);
       setIsLoading(false);
       onEndGame();
     }
@@ -196,7 +207,25 @@ export default function AdminDashboard({
     };
   }, [isClockRunning]);
 
-  const toggleClock = () => setIsClockRunning(!isClockRunning);
+  const toggleClock = () => {
+    if (isClockRunning) {
+      setIsClockRunning(false);
+      return;
+    }
+
+    const hasFouledOutActivePlayer =
+      activePlayersA.some((player) => player.fls >= 5) ||
+      activePlayersB.some((player) => player.fls >= 5);
+
+    if (hasFouledOutActivePlayer) {
+      return Alert.alert(
+        "Clock Start Blocked",
+        "A fouled out player is still on the court. Make a substitution before starting the game clock.",
+      );
+    }
+
+    setIsClockRunning(true);
+  };
   const resetShotClock24 = () => setShotClock(24);
   const resetShotClock14 = () => setShotClock(14);
   const formatTime = (totalSeconds: number) => {
@@ -205,11 +234,24 @@ export default function AdminDashboard({
     return `${minutes}:${seconds < 10 ? "0" : ""}${seconds}`;
   };
 
-  const handleAdvanceQuarter = () => {
+  const executeAdvanceQuarter = () => {
     setQuarter((prev) => prev + 1);
     setGameTime(600);
     setShotClock(24);
     setIsClockRunning(false);
+    // PHASE 15: Reset Team Fouls at the start of a new quarter
+    setTeamFoulsA(0);
+    setTeamFoulsB(0);
+  };
+
+  const handleAdvanceQuarter = () => {
+    Alert.alert("Advance Quarter", "Move to the next quarter?", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Advance",
+        onPress: executeAdvanceQuarter,
+      },
+    ]);
   };
 
   const getQuarterText = () => {
@@ -221,10 +263,11 @@ export default function AdminDashboard({
   };
 
   const handleEndMatch = () => {
-    if (scoreA === scoreB) {
-      Alert.alert("Tie Game!", "Advance to Overtime to declare a winner.");
-      return;
-    }
+    if (scoreA === scoreB)
+      return Alert.alert(
+        "Tie Game!",
+        "Advance to Overtime to declare a winner.",
+      );
     Alert.alert("End Match", "Are you sure? This cannot be undone.", [
       { text: "Cancel", style: "cancel" },
       { text: "End Game", style: "destructive", onPress: executeEndMatch },
@@ -244,7 +287,7 @@ export default function AdminDashboard({
       });
       setIsGameOver(true);
     } catch (error) {
-      console.error("Failed to end game:", error);
+      console.error(error);
     }
   };
 
@@ -253,8 +296,20 @@ export default function AdminDashboard({
       return Alert.alert("Action Required", "Please select a player first!");
     if (!teamA || !teamB || !gameId) return;
 
+    // Identify player and team
     const isTeamA = activePlayersA.some((p) => p.id === selectedPlayer);
     const playerTeamId = isTeamA ? teamA.id : teamB.id;
+    const playerObj = isTeamA
+      ? activePlayersA.find((p) => p.id === selectedPlayer)
+      : activePlayersB.find((p) => p.id === selectedPlayer);
+
+    // PHASE 15: FOUL OUT BLOCKER
+    if (playerObj && playerObj.fls >= 5) {
+      return Alert.alert(
+        "Fouled Out",
+        "This player has 5 fouls and cannot commit any more actions. Please substitute them immediately.",
+      );
+    }
 
     try {
       await database.write(async () => {
@@ -267,6 +322,13 @@ export default function AdminDashboard({
           event.timestampMs = Date.now();
         });
       });
+
+      // PHASE 15: INCREMENT TEAM FOULS
+      if (statName === "Foul") {
+        if (isTeamA) setTeamFoulsA((prev) => prev + 1);
+        else setTeamFoulsB((prev) => prev + 1);
+      }
+
       setSelectedPlayer(null);
       loadGameData();
     } catch (error) {
@@ -282,9 +344,18 @@ export default function AdminDashboard({
         .query(Q.where("game_id", gameId))
         .fetch();
       if (events.length === 0) return Alert.alert("Nothing to undo!");
+
       const latestEvent = events.sort(
         (a, b) => b.timestampMs - a.timestampMs,
       )[0];
+
+      // PHASE 15: DECREMENT TEAM FOUL ON UNDO
+      if (latestEvent.eventType === "Foul") {
+        if (latestEvent.teamId === teamA?.id)
+          setTeamFoulsA((prev) => Math.max(0, prev - 1));
+        else setTeamFoulsB((prev) => Math.max(0, prev - 1));
+      }
+
       await database.write(async () => {
         await latestEvent.destroyPermanently();
       });
@@ -328,6 +399,12 @@ export default function AdminDashboard({
     }
   };
 
+  // Manual fallback override for team fouls just in case the official makes a mistake
+  const manualAdjustFouls = (team: "A" | "B") => {
+    if (team === "A") setTeamFoulsA((prev) => (prev >= 5 ? 0 : prev + 1));
+    else setTeamFoulsB((prev) => (prev >= 5 ? 0 : prev + 1));
+  };
+
   if (isLoading)
     return (
       <View
@@ -342,7 +419,6 @@ export default function AdminDashboard({
       </View>
     );
 
-  // GAME OVER SCREEN
   if (isGameOver) {
     const winnerName = scoreA > scoreB ? teamA?.name : teamB?.name;
     const loserScore = scoreA > scoreB ? scoreB : scoreA;
@@ -367,17 +443,26 @@ export default function AdminDashboard({
     <View style={styles.container}>
       {/* ── HEADER ── */}
       <View style={styles.header}>
-        {/* Team A Score */}
+        {/* Team A Score & Fouls */}
         <View style={styles.scoreBox}>
           <Text style={styles.teamNameText} numberOfLines={1}>
             {teamA?.name.toUpperCase()}
           </Text>
           <Text style={styles.scoreText}>{scoreA}</Text>
+          <TouchableOpacity
+            onPress={() => manualAdjustFouls("A")}
+            style={styles.teamFoulContainer}
+          >
+            {teamFoulsA >= 5 ? (
+              <Text style={styles.bonusText}>BONUS</Text>
+            ) : (
+              <Text style={styles.teamFoulText}>FOULS: {teamFoulsA}</Text>
+            )}
+          </TouchableOpacity>
         </View>
 
         {/* Center Clock */}
         <View style={styles.centerSection}>
-          {/* Quarter Badge — inline, left of clock */}
           <View style={styles.quarterBlock}>
             <Text style={styles.quarterLabel}>QUARTER</Text>
             <TouchableOpacity
@@ -389,7 +474,6 @@ export default function AdminDashboard({
             <Text style={styles.quarterHint}>tap to advance</Text>
           </View>
 
-          {/* Game Clock */}
           <TouchableOpacity onPress={toggleClock} style={styles.gameClockBtn}>
             <Text
               style={[
@@ -404,7 +488,6 @@ export default function AdminDashboard({
             </Text>
           </TouchableOpacity>
 
-          {/* Shot Clock */}
           <View style={styles.shotClockWrapper}>
             <Text
               style={[
@@ -425,12 +508,22 @@ export default function AdminDashboard({
           </View>
         </View>
 
-        {/* Team B Score */}
+        {/* Team B Score & Fouls */}
         <View style={styles.scoreBox}>
           <Text style={styles.teamNameText} numberOfLines={1}>
             {teamB?.name.toUpperCase()}
           </Text>
           <Text style={styles.scoreText}>{scoreB}</Text>
+          <TouchableOpacity
+            onPress={() => manualAdjustFouls("B")}
+            style={styles.teamFoulContainer}
+          >
+            {teamFoulsB >= 5 ? (
+              <Text style={styles.bonusText}>BONUS</Text>
+            ) : (
+              <Text style={styles.teamFoulText}>FOULS: {teamFoulsB}</Text>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -444,6 +537,7 @@ export default function AdminDashboard({
               style={[
                 styles.playerCard,
                 selectedPlayer === player.id && styles.selectedA,
+                player.fls >= 5 && styles.fouledOutCard, // PHASE 15: Foul out styling
               ]}
               onPress={() =>
                 setSelectedPlayer(
@@ -451,12 +545,28 @@ export default function AdminDashboard({
                 )
               }
             >
-              <View style={styles.jerseyBadge}>
+              <View
+                style={[
+                  styles.jerseyBadge,
+                  player.fls >= 5 && { backgroundColor: "#3d0000" },
+                ]}
+              >
                 <Text style={styles.jerseyNum}>{player.jersey}</Text>
               </View>
-              <Text style={styles.playerNameText} numberOfLines={1}>
-                {player.name}
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.playerNameText,
+                    player.fls >= 5 && { color: "#ff4444" },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {player.name}
+                </Text>
+                {player.fls >= 5 && (
+                  <Text style={styles.fouledOutTag}>FOULED OUT</Text>
+                )}
+              </View>
               <View style={styles.statPills}>
                 <View style={styles.statPill}>
                   <Text style={styles.statPillText}>{player.pts}</Text>
@@ -489,7 +599,6 @@ export default function AdminDashboard({
 
         {/* Center Action Panel */}
         <View style={styles.actionPanel}>
-          {/* Play-by-Play Log */}
           <View style={styles.logBox}>
             {playByPlayLogs.length === 0 ? (
               <Text style={styles.logEmpty}>No events yet</Text>
@@ -502,7 +611,6 @@ export default function AdminDashboard({
             )}
           </View>
 
-          {/* Stat Buttons — Points */}
           <View style={styles.btnRow}>
             <TouchableOpacity
               style={styles.pointBtn}
@@ -527,7 +635,6 @@ export default function AdminDashboard({
             </TouchableOpacity>
           </View>
 
-          {/* Stat Buttons — Actions */}
           <View style={styles.btnRow}>
             <TouchableOpacity
               style={styles.actionBtn}
@@ -572,7 +679,6 @@ export default function AdminDashboard({
             </TouchableOpacity>
           </View>
 
-          {/* Utility Row */}
           <View style={styles.utilRow}>
             <TouchableOpacity style={styles.undoBtn} onPress={handleUndo}>
               <Text style={styles.undoBtnText}>↩ UNDO</Text>
@@ -594,6 +700,7 @@ export default function AdminDashboard({
               style={[
                 styles.playerCard,
                 selectedPlayer === player.id && styles.selectedB,
+                player.fls >= 5 && styles.fouledOutCard, // PHASE 15
               ]}
               onPress={() =>
                 setSelectedPlayer(
@@ -601,12 +708,28 @@ export default function AdminDashboard({
                 )
               }
             >
-              <View style={styles.jerseyBadge}>
+              <View
+                style={[
+                  styles.jerseyBadge,
+                  player.fls >= 5 && { backgroundColor: "#3d0000" },
+                ]}
+              >
                 <Text style={styles.jerseyNum}>{player.jersey}</Text>
               </View>
-              <Text style={styles.playerNameText} numberOfLines={1}>
-                {player.name}
-              </Text>
+              <View style={{ flex: 1 }}>
+                <Text
+                  style={[
+                    styles.playerNameText,
+                    player.fls >= 5 && { color: "#ff4444" },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {player.name}
+                </Text>
+                {player.fls >= 5 && (
+                  <Text style={styles.fouledOutTag}>FOULED OUT</Text>
+                )}
+              </View>
               <View style={styles.statPills}>
                 <View style={styles.statPill}>
                   <Text style={styles.statPillText}>{player.pts}</Text>
@@ -695,10 +818,8 @@ const BORDER = "#2a2a2a";
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: BG },
-
-  // ── HEADER ──
   header: {
-    height: 90,
+    height: 100,
     flexDirection: "row",
     alignItems: "center",
     borderBottomWidth: 1,
@@ -706,11 +827,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     backgroundColor: SURFACE,
   },
-  scoreBox: {
-    flex: 1.2,
-    alignItems: "center",
-    justifyContent: "center",
-  },
+  scoreBox: { flex: 1.2, alignItems: "center", justifyContent: "center" },
   teamNameText: {
     color: "#777",
     fontSize: 11,
@@ -719,14 +836,31 @@ const styles = StyleSheet.create({
     textTransform: "uppercase",
     marginBottom: 2,
   },
-  scoreText: {
-    color: "#fff",
-    fontSize: 48,
+  scoreText: { color: "#fff", fontSize: 48, fontWeight: "900", lineHeight: 52 },
+
+  // Phase 15 additions for Header
+  teamFoulContainer: {
+    marginTop: 4,
+    backgroundColor: "#1a1a1a",
+    paddingHorizontal: 12,
+    paddingVertical: 2,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: "#333",
+  },
+  teamFoulText: {
+    color: "#888",
+    fontSize: 10,
+    fontWeight: "bold",
+    letterSpacing: 1,
+  },
+  bonusText: {
+    color: "#FFE81F",
+    fontSize: 10,
     fontWeight: "900",
-    lineHeight: 52,
+    letterSpacing: 2,
   },
 
-  // Center section
   centerSection: {
     flex: 2,
     flexDirection: "row",
@@ -734,11 +868,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 12,
   },
-  quarterBlock: {
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 3,
-  },
+  quarterBlock: { alignItems: "center", justifyContent: "center", gap: 3 },
   quarterLabel: {
     color: "#444",
     fontSize: 8,
@@ -757,11 +887,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     letterSpacing: 1,
   },
-  quarterHint: {
-    color: "#333",
-    fontSize: 8,
-    fontWeight: "600",
-  },
+  quarterHint: { color: "#333", fontSize: 8, fontWeight: "600" },
   gameClockBtn: {
     alignItems: "center",
     backgroundColor: "#111",
@@ -781,7 +907,6 @@ const styles = StyleSheet.create({
   },
   clockPaused: { color: ACCENT_RED },
   clockHint: { color: "#444", fontSize: 9, letterSpacing: 1, marginTop: 1 },
-
   shotClockWrapper: { alignItems: "center" },
   shotClockText: {
     color: ACCENT_RED,
@@ -800,8 +925,6 @@ const styles = StyleSheet.create({
     borderColor: "#333",
   },
   scBtnText: { color: "#ccc", fontWeight: "700", fontSize: 12 },
-
-  // ── COURT AREA ──
   courtArea: {
     flex: 1,
     flexDirection: "row",
@@ -809,16 +932,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     gap: 4,
   },
-
-  // Roster Panel — KEY FIX: use flex layout to distribute 5 players evenly
   rosterPanel: {
     flex: 1,
     flexDirection: "column",
-    justifyContent: "space-between", // distributes all 5 evenly without scrolling
+    justifyContent: "space-between",
     gap: 4,
   },
+
   playerCard: {
-    flex: 1, // each card takes equal share of the panel height
+    flex: 1,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: SURFACE,
@@ -829,14 +951,22 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
     gap: 6,
   },
-  selectedA: {
-    borderColor: ACCENT_A,
-    backgroundColor: "#0e1e30",
+  selectedA: { borderColor: ACCENT_A, backgroundColor: "#0e1e30" },
+  selectedB: { borderColor: ACCENT_B, backgroundColor: "#2e1700" },
+
+  // Phase 15 additions for Foul Outs
+  fouledOutCard: {
+    backgroundColor: "#1a0d0d",
+    borderColor: "#3d0000",
+    opacity: 0.8,
   },
-  selectedB: {
-    borderColor: ACCENT_B,
-    backgroundColor: "#2e1700",
+  fouledOutTag: {
+    color: "#ff4444",
+    fontSize: 8,
+    fontWeight: "900",
+    letterSpacing: 1,
   },
+
   jerseyBadge: {
     width: 32,
     height: 32,
@@ -845,17 +975,8 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  jerseyNum: {
-    color: "#ccc",
-    fontSize: 13,
-    fontWeight: "800",
-  },
-  playerNameText: {
-    color: "#f0f0f0",
-    fontSize: 14,
-    fontWeight: "600",
-    flex: 1,
-  },
+  jerseyNum: { color: "#ccc", fontSize: 13, fontWeight: "800" },
+  playerNameText: { color: "#f0f0f0", fontSize: 14, fontWeight: "600" },
   statPills: { flexDirection: "row", gap: 4 },
   statPill: {
     alignItems: "center",
@@ -869,8 +990,6 @@ const styles = StyleSheet.create({
   statPillText: { color: "#fff", fontSize: 12, fontWeight: "700" },
   statPillLabel: { color: "#555", fontSize: 8, fontWeight: "600" },
   foulPillText: { color: ACCENT_RED },
-
-  // ── ACTION PANEL ──
   actionPanel: {
     flex: 1.3,
     flexDirection: "column",
@@ -892,14 +1011,7 @@ const styles = StyleSheet.create({
   },
   logEmpty: { color: "#333", fontSize: 11, textAlign: "center" },
   logEntry: { color: "#4da6ff", fontSize: 10, marginBottom: 1 },
-
-  btnRow: {
-    flexDirection: "row",
-    width: "100%",
-    gap: 5,
-  },
-
-  // Point buttons — slightly taller & distinct
+  btnRow: { flexDirection: "row", width: "100%", gap: 5 },
   pointBtn: {
     flex: 1,
     backgroundColor: "#fff",
@@ -911,8 +1023,6 @@ const styles = StyleSheet.create({
   pointBtn3: { backgroundColor: "#d5d5d5" },
   pointBtnText: { color: "#000", fontWeight: "900", fontSize: 16 },
   pointBtnSub: { color: "#666", fontSize: 8, fontWeight: "600", marginTop: 1 },
-
-  // Action buttons
   actionBtn: {
     flex: 1,
     backgroundColor: SURFACE2,
@@ -925,14 +1035,7 @@ const styles = StyleSheet.create({
   actionBtnText: { color: "#ddd", fontWeight: "700", fontSize: 12 },
   foulBtn: { borderColor: ACCENT_RED },
   foulBtnText: { color: ACCENT_RED },
-
-  // Utility row
-  utilRow: {
-    flexDirection: "row",
-    width: "100%",
-    gap: 5,
-    marginTop: 2,
-  },
+  utilRow: { flexDirection: "row", width: "100%", gap: 5, marginTop: 2 },
   undoBtn: {
     flex: 1,
     backgroundColor: "#2a2a2a",
@@ -957,8 +1060,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   endBtnText: { color: "#fff", fontWeight: "700", fontSize: 11 },
-
-  // ── MODAL ──
   modalOverlay: {
     flex: 1,
     backgroundColor: "rgba(0,0,0,0.85)",
@@ -1012,8 +1113,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     letterSpacing: 1,
   },
-
-  // ── GAME OVER SCREEN ──
   gameOverContainer: {
     flex: 1,
     backgroundColor: BG,
