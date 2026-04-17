@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Modal, Alert } from 'react-native';
 import { Q } from '@nozbe/watermelondb';
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
 
 import { database } from '../db';
 import Game from '../db/models/Game';
@@ -18,8 +20,8 @@ interface HistoryRow {
 }
 
 interface PlayerStatLine {
-  id: string;      // NEW: Added ID for the Edit function
-  teamId: string;  // NEW: Added Team ID for the Edit function
+  id: string;      
+  teamId: string;  
   name: string;
   jersey: string;
   pts: number;
@@ -47,9 +49,12 @@ export default function MatchHistory({ onBack }: MatchHistoryProps) {
   const [boxScoreB, setBoxScoreB] = useState<PlayerStatLine[]>([]);
   const [sortConfig, setSortConfig] = useState<{ key: SortKey; direction: 'asc' | 'desc' }>({ key: 'pts', direction: 'desc' });
 
-  // --- PHASE 16: EDIT MODE STATE ---
+  // Edit Mode State
   const [isEditMode, setIsEditMode] = useState(false);
   const [editPlayerId, setEditPlayerId] = useState<string | null>(null);
+
+  // --- PHASE 17: SHARE REF ---
+  const boxScoreRef = useRef<View>(null);
 
   useEffect(() => {
     fetchHistory();
@@ -87,7 +92,6 @@ export default function MatchHistory({ onBack }: MatchHistoryProps) {
     }
   };
 
-  // Separated the data crunching so we can recall it silently during edits
   const reloadBoxScoreData = async (gameRow: HistoryRow) => {
     const events = await database.get<GameEvent>('game_events').query(Q.where('game_id', gameRow.game.id)).fetch();
     const playersA = await database.get<Player>('players').query(Q.where('team_id', gameRow.teamA.id)).fetch();
@@ -126,15 +130,12 @@ export default function MatchHistory({ onBack }: MatchHistoryProps) {
     } catch (error) { console.error("Failed to generate box score:", error); }
   };
 
-  // --- PHASE 16: DATABASE CORRECTION INJECTION ---
   const handleAdjustStat = async (eventType: string, amount: number) => {
     if (!selectedGame || !editPlayerId) return;
 
-    // Find the player being edited to get their team ID
     const activeEditPlayer = boxScoreA.find(p => p.id === editPlayerId) || boxScoreB.find(p => p.id === editPlayerId);
     if (!activeEditPlayer) return;
 
-    // Prevent dropping stats below 0
     if (amount < 0) {
       let currentVal = 0;
       if (eventType === 'Point') currentVal = activeEditPlayer.pts;
@@ -145,11 +146,10 @@ export default function MatchHistory({ onBack }: MatchHistoryProps) {
       else if (eventType === 'Turnover') currentVal = activeEditPlayer.to;
       else if (eventType === 'Foul') currentVal = activeEditPlayer.fls;
       
-      if (currentVal <= 0) return; // Block negative correction
+      if (currentVal <= 0) return; 
     }
 
     try {
-      // 1. Write the correction event to the database
       await database.write(async () => {
         await database.get<GameEvent>('game_events').create(event => {
           event.gameId = selectedGame.game.id;
@@ -161,9 +161,7 @@ export default function MatchHistory({ onBack }: MatchHistoryProps) {
         });
       });
 
-      // 2. Silently reload the box score so the UI updates instantly
       await reloadBoxScoreData(selectedGame);
-      // 3. Silently update the main history list so the W/L record and totals are fresh
       fetchHistory();
 
     } catch (error) {
@@ -172,7 +170,21 @@ export default function MatchHistory({ onBack }: MatchHistoryProps) {
     }
   };
 
-  // --- SORTING LOGIC ---
+  // --- PHASE 17: SHARE FUNCTION ---
+  const handleShare = async () => {
+    try {
+      const uri = await captureRef(boxScoreRef, { format: 'png', quality: 1 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { dialogTitle: 'Share Box Score' });
+      } else {
+        Alert.alert("Error", "Sharing is not available on this device.");
+      }
+    } catch (error) {
+      console.error("Snapshot failed", error);
+      Alert.alert("Error", "Could not generate screenshot.");
+    }
+  };
+
   const handleSort = (key: SortKey) => { setSortConfig(prev => ({ key, direction: prev.key === key && prev.direction === 'desc' ? 'asc' : 'desc' })); };
   const getSortedData = (data: PlayerStatLine[]) => {
     return [...data].sort((a, b) => {
@@ -228,7 +240,6 @@ export default function MatchHistory({ onBack }: MatchHistoryProps) {
     );
   };
 
-  // Helper to get fresh data for the Edit Modal
   const activeEditPlayer = editPlayerId ? (boxScoreA.find(p => p.id === editPlayerId) || boxScoreB.find(p => p.id === editPlayerId)) : null;
 
   const StatAdjuster = ({ label, value, eventType }: { label: string, value: number, eventType: string }) => (
@@ -299,28 +310,50 @@ export default function MatchHistory({ onBack }: MatchHistoryProps) {
             
             <Text style={styles.modalTitle}>{isEditMode ? "EDITING BOX SCORE" : "OFFICIAL BOX SCORE"}</Text>
             
-            {/* EDIT MODE TOGGLE */}
-            <TouchableOpacity style={[styles.editToggleBtn, isEditMode && styles.editToggleActive]} onPress={() => setIsEditMode(!isEditMode)}>
-              <Text style={[styles.editToggleText, isEditMode && {color: '#000'}]}>{isEditMode ? "DONE EDITING" : "EDIT MODE"}</Text>
-            </TouchableOpacity>
+            <View style={{flexDirection: 'row', gap: 10}}>
+              {/* NEW SHARE BUTTON */}
+              {!isEditMode && (
+                <TouchableOpacity style={styles.shareBtn} onPress={handleShare}>
+                  <Text style={styles.shareBtnText}>📸 SHARE</Text>
+                </TouchableOpacity>
+              )}
+              {/* EDIT MODE TOGGLE */}
+              <TouchableOpacity style={[styles.editToggleBtn, isEditMode && styles.editToggleActive]} onPress={() => setIsEditMode(!isEditMode)}>
+                <Text style={[styles.editToggleText, isEditMode && {color: '#000'}]}>{isEditMode ? "DONE EDITING" : "EDIT MODE"}</Text>
+              </TouchableOpacity>
+            </View>
           </View>
           
           <ScrollView style={styles.modalBody}>
             {selectedGame && (
               <>
+                {/* 1. Moved Edit Hint OUTSIDE the screenshot ref */}
                 {isEditMode && <Text style={styles.editHintText}>Tap any player below to adjust their stats.</Text>}
                 
-                {/* Find the fresh game score directly from the history docs array so it updates live! */}
-                {(() => {
-                  const liveGameRecord = historyDocs.find(h => h.game.id === selectedGame.game.id);
-                  return (
-                    <>
-                      {renderBoxScoreTable(selectedGame.teamA.name, boxScoreA, liveGameRecord?.scoreA || selectedGame.scoreA)}
-                      <View style={{height: 20}} />
-                      {renderBoxScoreTable(selectedGame.teamB.name, boxScoreB, liveGameRecord?.scoreB || selectedGame.scoreB)}
-                    </>
-                  );
-                })()}
+                {/* 2. The Capture Area */}
+                <View ref={boxScoreRef} style={{ backgroundColor: '#0d0d0d', padding: 15, borderRadius: 10 }} collapsable={false}>
+                  
+                  {/* Graphic Header */}
+                  <View style={{ alignItems: 'center', marginBottom: 15 }}>
+                    <Text style={{ color: '#fff', fontSize: 20, fontWeight: '900', letterSpacing: 2 }}>OFFICIAL BOX SCORE</Text>
+                    <Text style={{ color: '#888', fontSize: 12, fontWeight: 'bold', marginTop: 2 }}>{selectedGame.date}</Text>
+                  </View>
+
+                  {(() => {
+                    const liveGameRecord = historyDocs.find(h => h.game.id === selectedGame.game.id);
+                    return (
+                      /* 3. SIDE-BY-SIDE FLEX ROW */
+                      <View style={{ flexDirection: 'row', gap: 15 }}>
+                        <View style={{ flex: 1 }}>
+                          {renderBoxScoreTable(selectedGame.teamA.name, boxScoreA, liveGameRecord?.scoreA || selectedGame.scoreA)}
+                        </View>
+                        <View style={{ flex: 1 }}>
+                          {renderBoxScoreTable(selectedGame.teamB.name, boxScoreB, liveGameRecord?.scoreB || selectedGame.scoreB)}
+                        </View>
+                      </View>
+                    );
+                  })()}
+                </View>
                 
                 <View style={{height: 40}} />
               </>
@@ -336,7 +369,6 @@ export default function MatchHistory({ onBack }: MatchHistoryProps) {
             <Text style={styles.editBoxTitle}>CORRECT PLAYER STATS</Text>
             <Text style={styles.editBoxName}>#{activeEditPlayer?.jersey} {activeEditPlayer?.name}</Text>
             
-            {/* ADDED SCROLLVIEW HERE */}
             <ScrollView style={{ flexGrow: 0 }} showsVerticalScrollIndicator={false}>
               <View style={styles.adjusterGrid}>
                 <StatAdjuster label="POINTS" value={activeEditPlayer?.pts || 0} eventType="Point" />
@@ -386,13 +418,16 @@ const styles = StyleSheet.create({
   vsText: { color: '#555', fontSize: 14, fontWeight: 'bold', marginHorizontal: 15 },
   viewStatsText: { color: '#4da6ff', fontSize: 12, textAlign: 'right', marginTop: 15, fontWeight: 'bold' },
 
-  // Phase 16 Modal Updates
   modalContainer: { flex: 1, backgroundColor: '#0d0d0d' },
   modalHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 15, borderBottomWidth: 1, borderColor: '#333', backgroundColor: '#1a1a1a' },
   closeBtn: { backgroundColor: '#ff4444', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 5 },
   closeBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
   modalTitle: { color: '#fff', fontSize: 16, fontWeight: 'bold', letterSpacing: 1 },
   
+  // Phase 17 Share Button Update
+  shareBtn: { backgroundColor: '#8a2be2', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 5 },
+  shareBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+
   editToggleBtn: { borderWidth: 1, borderColor: '#ff9933', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 5 },
   editToggleActive: { backgroundColor: '#ff9933' },
   editToggleText: { color: '#ff9933', fontWeight: 'bold', fontSize: 12 },
@@ -410,13 +445,12 @@ const styles = StyleSheet.create({
   boldCell: { color: '#fff', fontWeight: '900' },
   foulWarning: { color: '#ff4444', fontWeight: 'bold' },
 
-  // Edit Overlay UI
   editOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
   editBox: { width: '60%', maxHeight: '90%', backgroundColor: '#222', borderRadius: 10, padding: 20, borderWidth: 2, borderColor: '#ff9933' },
   editBoxTitle: { color: '#ff9933', fontWeight: 'bold', fontSize: 14, textAlign: 'center', letterSpacing: 1 },
   editBoxName: { color: '#fff', fontSize: 24, fontWeight: '900', textAlign: 'center', marginBottom: 10 }, 
   
-  adjusterGrid: { gap: 8 }, // Reduced gap
+  adjusterGrid: { gap: 8 },
   adjRow: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1a1a1a', borderRadius: 8, overflow: 'hidden' },
   adjLabel: { flex: 1, color: '#aaa', fontWeight: 'bold', paddingLeft: 15 },
   adjBtnSub: { backgroundColor: '#ff4444', paddingHorizontal: 20, paddingVertical: 8 },

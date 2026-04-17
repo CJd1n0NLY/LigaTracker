@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Alert } from 'react-native';
 import { Q } from '@nozbe/watermelondb';
+import { captureRef } from 'react-native-view-shot';
+import * as Sharing from 'expo-sharing';
 
 import { database } from '../db';
 import Game from '../db/models/Game';
@@ -38,10 +40,12 @@ export default function Leaderboards({ onBack }: LeaderboardsProps) {
   const [standings, setStandings] = useState<TeamStanding[]>([]);
   const [mvpRace, setMvpRace] = useState<PlayerRanking[]>([]);
 
+  // --- PHASE 17: SHARE REF ---
+  const leaderboardRef = useRef<View>(null);
+
   useEffect(() => {
     const fetchLeaderboards = async () => {
       try {
-        // 1. Fetch Core Data
         const allTeams = await database.get<Team>('teams').query().fetch();
         const allPlayers = await database.get<Player>('players').query().fetch();
         const finishedGames = await database.get<Game>('games').query(Q.where('status', 'finished')).fetch();
@@ -49,7 +53,6 @@ export default function Leaderboards({ onBack }: LeaderboardsProps) {
 
         const finishedGameIds = finishedGames.map(g => g.id);
 
-        // --- CALCULATE TEAM STANDINGS ---
         const teamStats: Record<string, { name: string; w: number; l: number }> = {};
         allTeams.forEach(t => teamStats[t.id] = { name: t.name, w: 0, l: 0 });
 
@@ -67,11 +70,9 @@ export default function Leaderboards({ onBack }: LeaderboardsProps) {
           return { id, name: stats.name, w: stats.w, l: stats.l, pct };
         });
 
-        // Sort by Wins desc, then Losses asc
         compiledStandings.sort((a, b) => b.w - a.w || a.l - b.l);
         setStandings(compiledStandings);
 
-        // --- CALCULATE MVP RACE ---
         const validEvents = allEvents.filter(e => finishedGameIds.includes(e.gameId));
         const playerTally: Record<string, { pts: number; reb: number; ast: number; teamId: string }> = {};
 
@@ -100,9 +101,8 @@ export default function Leaderboards({ onBack }: LeaderboardsProps) {
           };
         });
 
-        // Sort by Points Per Game
         compiledMvp.sort((a, b) => parseFloat(b.ptsPerGame) - parseFloat(a.ptsPerGame));
-        setMvpRace(compiledMvp.filter(p => p.gamesPlayed > 0)); // Only show active players
+        setMvpRace(compiledMvp.filter(p => p.gamesPlayed > 0));
 
         setIsLoading(false);
       } catch (error) {
@@ -112,6 +112,21 @@ export default function Leaderboards({ onBack }: LeaderboardsProps) {
     
     fetchLeaderboards();
   }, []);
+
+  // --- PHASE 17: SHARE FUNCTION ---
+  const handleShare = async () => {
+    try {
+      const uri = await captureRef(leaderboardRef, { format: 'png', quality: 1 });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { dialogTitle: 'Share Leaderboard' });
+      } else {
+        Alert.alert("Error", "Sharing is not available on this device.");
+      }
+    } catch (error) {
+      console.error("Snapshot failed", error);
+      Alert.alert("Error", "Could not generate screenshot.");
+    }
+  };
 
   if (isLoading) return <View style={styles.container}><Text style={styles.loadingText}>Calculating Leaderboards...</Text></View>;
 
@@ -139,58 +154,68 @@ export default function Leaderboards({ onBack }: LeaderboardsProps) {
           </TouchableOpacity>
         </View>
 
-        <View style={{width: 80}} /> 
+        {/* SHARE BUTTON */}
+        <TouchableOpacity style={styles.shareBtn} onPress={handleShare}>
+          <Text style={styles.shareBtnText}>SHARE</Text>
+        </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.contentContainer}>
-        {/* VIEW A: STANDINGS */}
-        {activeTab === 'standings' && (
-          <View style={styles.tableBox}>
-            <View style={styles.tableHead}>
-              <Text style={[styles.cellText, styles.headerCellText, {flex: 0.5}]}>RK</Text>
-              <Text style={[styles.cellText, styles.headerCellText, {flex: 3, textAlign: 'left'}]}>TEAM</Text>
-              <Text style={[styles.cellText, styles.headerCellText]}>W</Text>
-              <Text style={[styles.cellText, styles.headerCellText]}>L</Text>
-              <Text style={[styles.cellText, styles.headerCellText]}>PCT</Text>
-            </View>
-            {standings.map((team, index) => (
-              <View key={team.id} style={styles.tableRow}>
-                <Text style={[styles.cellText, styles.rankText, {flex: 0.5}]}>{index + 1}</Text>
-                <Text style={[styles.cellText, styles.nameText, {flex: 3, textAlign: 'left'}]} numberOfLines={1}>{team.name.toUpperCase()}</Text>
-                <Text style={[styles.cellText, styles.boldCell, {color: '#00cc66'}]}>{team.w}</Text>
-                <Text style={[styles.cellText, styles.boldCell, {color: '#ff4444'}]}>{team.l}</Text>
-                <Text style={[styles.cellText, styles.boldCell]}>{team.pct}</Text>
-              </View>
-            ))}
-          </View>
-        )}
+        {/* We attach the ref to a View that contains the active table so the screenshot looks clean */}
+        <View ref={leaderboardRef} style={{ backgroundColor: '#111', padding: 5 }} collapsable={false}>
+          
+          {/* Header to show in the screenshot so people know what they are looking at */}
+          <Text style={styles.screenshotTitle}>LIGATRACKER {activeTab === 'standings' ? 'STANDINGS' : 'MVP RACE'}</Text>
 
-        {/* VIEW B: MVP RACE */}
-        {activeTab === 'mvp' && (
-          <View style={styles.tableBox}>
-             <View style={styles.tableHead}>
-              <Text style={[styles.cellText, styles.headerCellText, {flex: 0.5}]}>RK</Text>
-              <Text style={[styles.cellText, styles.headerCellText, {flex: 3, textAlign: 'left'}]}>PLAYER</Text>
-              <Text style={[styles.cellText, styles.headerCellText]}>GP</Text>
-              <Text style={[styles.cellText, styles.headerCellText, {color: '#FFE81F'}]}>PPG</Text>
-              <Text style={[styles.cellText, styles.headerCellText]}>RPG</Text>
-              <Text style={[styles.cellText, styles.headerCellText]}>APG</Text>
-            </View>
-            {mvpRace.map((player, index) => (
-              <View key={player.id} style={styles.tableRow}>
-                 <Text style={[styles.cellText, styles.rankText, {flex: 0.5}]}>{index + 1}</Text>
-                 <View style={{flex: 3, justifyContent: 'center'}}>
-                    <Text style={[styles.cellText, styles.nameText, {textAlign: 'left'}]} numberOfLines={1}>{player.name}</Text>
-                    <Text style={[styles.cellText, styles.subNameText, {textAlign: 'left'}]} numberOfLines={1}>{player.teamName}</Text>
-                 </View>
-                 <Text style={[styles.cellText]}>{player.gamesPlayed}</Text>
-                 <Text style={[styles.cellText, styles.boldCell, {color: '#FFE81F', fontSize: 16}]}>{player.ptsPerGame}</Text>
-                 <Text style={[styles.cellText, styles.boldCell]}>{player.rebPerGame}</Text>
-                 <Text style={[styles.cellText, styles.boldCell]}>{player.astPerGame}</Text>
+          {/* VIEW A: STANDINGS */}
+          {activeTab === 'standings' && (
+            <View style={styles.tableBox}>
+              <View style={styles.tableHead}>
+                <Text style={[styles.cellText, styles.headerCellText, {flex: 0.5}]}>RK</Text>
+                <Text style={[styles.cellText, styles.headerCellText, {flex: 3, textAlign: 'left'}]}>TEAM</Text>
+                <Text style={[styles.cellText, styles.headerCellText]}>W</Text>
+                <Text style={[styles.cellText, styles.headerCellText]}>L</Text>
+                <Text style={[styles.cellText, styles.headerCellText]}>PCT</Text>
               </View>
-            ))}
-          </View>
-        )}
+              {standings.map((team, index) => (
+                <View key={team.id} style={styles.tableRow}>
+                  <Text style={[styles.cellText, styles.rankText, {flex: 0.5}]}>{index + 1}</Text>
+                  <Text style={[styles.cellText, styles.nameText, {flex: 3, textAlign: 'left'}]} numberOfLines={1}>{team.name.toUpperCase()}</Text>
+                  <Text style={[styles.cellText, styles.boldCell, {color: '#00cc66'}]}>{team.w}</Text>
+                  <Text style={[styles.cellText, styles.boldCell, {color: '#ff4444'}]}>{team.l}</Text>
+                  <Text style={[styles.cellText, styles.boldCell]}>{team.pct}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* VIEW B: MVP RACE */}
+          {activeTab === 'mvp' && (
+            <View style={styles.tableBox}>
+               <View style={styles.tableHead}>
+                <Text style={[styles.cellText, styles.headerCellText, {flex: 0.5}]}>RK</Text>
+                <Text style={[styles.cellText, styles.headerCellText, {flex: 3, textAlign: 'left'}]}>PLAYER</Text>
+                <Text style={[styles.cellText, styles.headerCellText]}>GP</Text>
+                <Text style={[styles.cellText, styles.headerCellText, {color: '#FFE81F'}]}>PPG</Text>
+                <Text style={[styles.cellText, styles.headerCellText]}>RPG</Text>
+                <Text style={[styles.cellText, styles.headerCellText]}>APG</Text>
+              </View>
+              {mvpRace.map((player, index) => (
+                <View key={player.id} style={styles.tableRow}>
+                   <Text style={[styles.cellText, styles.rankText, {flex: 0.5}]}>{index + 1}</Text>
+                   <View style={{flex: 3, justifyContent: 'center'}}>
+                      <Text style={[styles.cellText, styles.nameText, {textAlign: 'left'}]} numberOfLines={1}>{player.name}</Text>
+                      <Text style={[styles.cellText, styles.subNameText, {textAlign: 'left'}]} numberOfLines={1}>{player.teamName}</Text>
+                   </View>
+                   <Text style={[styles.cellText]}>{player.gamesPlayed}</Text>
+                   <Text style={[styles.cellText, styles.boldCell, {color: '#FFE81F', fontSize: 16}]}>{player.ptsPerGame}</Text>
+                   <Text style={[styles.cellText, styles.boldCell]}>{player.rebPerGame}</Text>
+                   <Text style={[styles.cellText, styles.boldCell]}>{player.astPerGame}</Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
       </ScrollView>
     </View>
   );
@@ -209,6 +234,11 @@ const styles = StyleSheet.create({
   activeTabBtn: { backgroundColor: '#333' },
   tabText: { color: '#666', fontWeight: 'bold', fontSize: 12, letterSpacing: 1 },
   activeTabText: { color: '#fff' },
+
+  // Phase 17 Share Button
+  shareBtn: { backgroundColor: '#8a2be2', paddingVertical: 8, paddingHorizontal: 15, borderRadius: 5, width: 80, alignItems: 'center' },
+  shareBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 12 },
+  screenshotTitle: { color: '#888', fontWeight: '900', letterSpacing: 2, textAlign: 'center', marginBottom: 10, fontSize: 16 },
 
   contentContainer: { padding: 20 },
   
