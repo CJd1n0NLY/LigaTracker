@@ -16,6 +16,7 @@ export default function TeamManager({ onBack }: TeamManagerProps) {
   const [draftPlayer, setDraftPlayer] = useState({ name: '', jersey: '' });
   const [roster, setRoster] = useState<DraftPlayer[]>([]);
   const [existingTeams, setExistingTeams] = useState<{name: string, count: number}[]>([]);
+  const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
     loadExistingTeams();
@@ -43,20 +44,19 @@ export default function TeamManager({ onBack }: TeamManagerProps) {
     if (roster.length < 5) return Alert.alert("Not Enough Players", "A team must have at least 5 players.");
 
     try {
+      setIsSaving(true);
       await database.write(async () => {
-        // 1. Save the Team
         const newTeam = await database.get<Team>('teams').create(team => {
           team.name = teamName;
           team.isEliminated = false;
         });
 
-        // 2. Save all Players linked to this Team
         for (const p of roster) {
           await database.get<Player>('players').create(player => {
             player.team.set(newTeam);
             player.name = p.name;
             player.jerseyNumber = p.jersey;
-            player.isActive = false; // Default to bench, chosen at game time
+            player.isActive = false; 
           });
         }
       });
@@ -68,6 +68,60 @@ export default function TeamManager({ onBack }: TeamManagerProps) {
     } catch (error) {
       console.error(error);
       Alert.alert("Error", "Failed to save team.");
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // --- ⚡ DEV SKIP: MASS TEAM GENERATOR ---
+  const handleDevSeedTeams = async () => {
+    Alert.alert(
+      "Seed Database",
+      "This will instantly generate 10 dummy teams with 10 players each. Continue?",
+      [
+        { text: "Cancel", style: "cancel" },
+        { text: "Generate", style: "destructive", onPress: executeSeed }
+      ]
+    );
+  };
+
+  const executeSeed = async () => {
+    setIsSaving(true);
+    try {
+      const dummyTeams = [
+        "QC Capitals", "Makati Bosses", "Manila Stars", "Pasay Pirates", "Pangasinan Waves", "Bulacan Warriors",
+        "Taguig Pilots", "San Juan Knights", "Marikina Shoemakers", "Valenzuela Vanguards"
+      ];
+      const lastNames = ["Santos", "Reyes", "Cruz", "Bautista", "Ocampo", "Garcia", "Mendoza", "Torres", "Tomas", "Andrada", "Perez", "Legaspi", "Villanueva", "Ramos"];
+
+      await database.write(async () => {
+        for (const tName of dummyTeams) {
+          const newTeam = await database.get<Team>('teams').create(team => {
+            team.name = tName;
+            team.isEliminated = false;
+          });
+
+          // Give each team exactly 10 players
+          for (let i = 0; i < 10; i++) {
+            await database.get<Player>('players').create(player => {
+              player.team.set(newTeam);
+              // Pick a random last name and add a letter to make it unique
+              const randomName = lastNames[Math.floor(Math.random() * lastNames.length)];
+              player.name = `${randomName} ${String.fromCharCode(65 + i)}`; 
+              player.jerseyNumber = Math.floor(Math.random() * 99).toString();
+              player.isActive = false;
+            });
+          }
+        }
+      });
+
+      Alert.alert("Dev Magic Complete", "10 Teams and 100 Players generated successfully!");
+      loadExistingTeams();
+    } catch (error) {
+      console.error(error);
+      Alert.alert("Error", "Failed to seed database.");
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -76,7 +130,11 @@ export default function TeamManager({ onBack }: TeamManagerProps) {
       <View style={styles.header}>
         <TouchableOpacity style={styles.backBtn} onPress={onBack}><Text style={styles.backBtnText}>← BACK</Text></TouchableOpacity>
         <Text style={styles.title}>LEAGUE MANAGER</Text>
-        <View style={{width: 80}} />
+        
+        {/* NEW DEV BUTTON HERE */}
+        <TouchableOpacity style={styles.devBtn} onPress={handleDevSeedTeams} disabled={isSaving}>
+          <Text style={styles.devBtnText}>{isSaving ? "SEEDING..." : "⚡ SEED 10 TEAMS"}</Text>
+        </TouchableOpacity>
       </View>
 
       <View style={styles.splitView}>
@@ -101,8 +159,8 @@ export default function TeamManager({ onBack }: TeamManagerProps) {
             ))}
           </ScrollView>
 
-          <TouchableOpacity style={styles.saveBtn} onPress={handleSaveTeam}>
-            <Text style={styles.saveBtnText}>SAVE TEAM TO LEAGUE</Text>
+          <TouchableOpacity style={[styles.saveBtn, isSaving && {opacity: 0.5}]} onPress={handleSaveTeam} disabled={isSaving}>
+            <Text style={styles.saveBtnText}>{isSaving ? "SAVING..." : "SAVE TEAM TO LEAGUE"}</Text>
           </TouchableOpacity>
         </View>
 
@@ -131,6 +189,10 @@ const styles = StyleSheet.create({
   backBtnText: { color: '#fff', fontWeight: 'bold' },
   title: { color: '#fff', fontSize: 20, fontWeight: 'bold', letterSpacing: 2 },
   
+  // Dev Button
+  devBtn: { backgroundColor: '#FFD700', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 5 },
+  devBtnText: { color: '#000', fontWeight: 'bold', fontSize: 12 },
+
   splitView: { flex: 1, flexDirection: 'row' },
   sectionTitle: { color: '#888', fontWeight: 'bold', letterSpacing: 1, marginBottom: 15 },
   
